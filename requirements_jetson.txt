@@ -1,0 +1,8 @@
+numpy
+requests
+pillow
+opencv-python
+scipy
+casadi
+# ROS2 via apt:
+#   sudo apt install ros-humble-cv-bridge ros-humble-message-filters
