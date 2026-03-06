@@ -158,8 +158,9 @@ class NavDPAgent:
         prop = self.image_size / max(H, W)
         for pixel_coord, input_image in zip(pixel_coords, input_images):
             panel = np.zeros_like(input_image, dtype=np.uint8)
-            min_x, min_y = pixel_coord[0] - 10, pixel_coord[1] - 10
-            max_x, max_y = pixel_coord[0] + 10, pixel_coord[1] + 10
+            px, py = int(pixel_coord[0]), int(pixel_coord[1])
+            min_x, min_y = px - 10, py - 10
+            max_x, max_y = px + 10, py + 10
             if min_x <= 0:
                 panel[:, 0:10] = 255
             elif min_y <= 0:

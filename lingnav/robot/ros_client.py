@@ -145,7 +145,7 @@ class LingNavNode(Node):
             depth=5,
         )
         rgb_sub   = Subscriber(self, Image, "/camera/color/image_raw")
-        depth_sub = Subscriber(self, Image, "/camera/depth/image")
+        depth_sub = Subscriber(self, Image, "/camera/depth/image_raw")
         self._sync = ApproximateTimeSynchronizer([rgb_sub, depth_sub], queue_size=5, slop=0.1)
         self._sync.registerCallback(self._rgb_depth_cb)
 

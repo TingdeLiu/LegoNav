@@ -212,6 +212,16 @@ python -m lingnav.core.pipeline \
 
 ### 4. Full Jetson deployment (ROS2 + local S1)
 
+> **Prerequisites:** Before running LingNav, start the robot chassis driver and camera driver in separate terminals so that the required ROS2 topics are available:
+>
+> ```bash
+> # Terminal 1 — robot base (publishes /odom, subscribes /cmd_vel)
+> ros2 launch wheeltec_robot base_node.launch.py
+>
+> # Terminal 2 — RGB-D camera (publishes /camera/color/image_raw and /camera/depth/image)
+> ros2 launch orbbec_camera gemini_336l.launch.py
+> ```
+
 ```bash
 conda activate navdp
 
