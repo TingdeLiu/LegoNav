@@ -13,6 +13,22 @@ Plug in any combination, run on Jetson edge hardware.
 
 ---
 
+## Table of Contents
+
+- [System Architecture](#system-architecture)
+- [Project Structure](#project-structure)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [S2 — Visual Language Model](#s2--visual-language-model)
+- [S1 — Navigation Policy](#s1--navigation-policy)
+- [Quick Start](#quick-start)
+- [Extending LegoNav](#extending-legonav)
+- [Camera Intrinsics](#camera-intrinsics)
+- [Troubleshooting](#troubleshooting)
+- [Acknowledgements](#acknowledgements)
+
+---
+
 ## System Architecture
 
 ```mermaid
@@ -80,8 +96,9 @@ graph LR
         J2 <-- "HTTP :8890" --> G2["GPU Server (S2)"]
     end
 
-    subgraph ModeC["Mode C: S2 API (No GPU)"]
-        PC["Any Machine"] <-- "HTTPS" --> API["Cloud VLM API\nOpenAI / Gemini / Kimi / Qwen"]
+    subgraph ModeC["Mode C: S2 API (No GPU Required)"]
+        PC["Any Machine"] -- "runs S2 server" --> SRV["S2 Server :8890"]
+        SRV <-- "HTTPS" --> API["Cloud VLM API\nOpenAI / Gemini / Kimi / Qwen"]
     end
 ```
 
@@ -119,9 +136,166 @@ LegoNav/
 ├── scripts/
 │   ├── start_s2_server.sh
 │   └── start_jetson.sh
+├── docs/
+│   └── banner.svg
 ├── setup.py
 ├── requirements_server.txt           # GPU server / API mode dependencies
 └── requirements_jetson.txt           # Jetson edge dependencies
+```
+
+---
+
+## Requirements
+
+### Hardware
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| **S2 GPU** (local mode) | 16 GB VRAM (7B model) | 24+ GB VRAM |
+| **S2 API mode** | Any machine with internet | — |
+| **S1 Edge** | Jetson Orin NX 8 GB | Jetson Orin NX 16 GB |
+| **RGB-D Camera** | Astra S (640×480) | Gemini 336L (1280×720) |
+
+### Software
+
+| Component | Version |
+|-----------|---------|
+| Python | 3.10 |
+| PyTorch | ≥ 2.1 |
+| ROS2 | Humble |
+| CUDA | ≥ 11.8 |
+| transformers | ≥ 4.51.0 (local S2 only) |
+
+---
+
+## Installation
+
+### S2 Server (GPU machine)
+
+```bash
+conda create -n legonav_s2 python=3.10
+conda activate legonav_s2
+
+# PyTorch (adjust for your CUDA version)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Install LegoNav
+cd /path/to/LegoNav
+pip install -e .
+pip install -r requirements_server.txt
+
+# Optional: Flash Attention (faster local inference)
+pip install flash-attn --no-build-isolation
+```
+
+**Model download (local mode only):**
+
+```bash
+# Qwen2.5-VL-7B (recommended, ~16 GB VRAM)
+huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct \
+    --local-dir /path/to/Qwen2.5-VL-7B-Instruct
+
+# Qwen3-VL-8B (latest)
+huggingface-cli download Qwen/Qwen3-VL-8B-Instruct \
+    --local-dir /path/to/Qwen3-VL-8B-Instruct
+```
+
+> API mode (`--backend api`) requires no model download — only `pip install openai`, which is already in `requirements_server.txt`.
+
+### S1 Edge (Jetson running NavDP)
+
+```bash
+conda create -n legonav_s1 python=3.10
+conda activate legonav_s1
+
+# Clone NavDP as a sibling of LegoNav
+cd ~/VLN
+git clone https://github.com/InternRobotics/NavDP
+
+# Jetson PyTorch (prebuilt aarch64 wheel)
+pip install /path/to/torchvision-0.21.0-cp310-cp310-linux_aarch64.whl
+
+# NavDP dependencies
+cd ~/VLN/NavDP/baselines/navdp
+pip install -r requirements.txt
+
+# Install LegoNav
+cd ~/VLN/LegoNav
+pip install -e .
+pip install -r requirements_jetson.txt
+
+# ROS2 packages
+sudo apt install ros-humble-cv-bridge ros-humble-message-filters
+```
+
+> **NavDP path resolution:** `navdp_agent.py` looks for `NavDP/` as a sibling of `LegoNav/`.
+> Override with: `export NAVDP_ROOT=/path/to/NavDP`
+
+---
+
+## Quick Start
+
+### 1. Start S2 server
+
+```bash
+conda activate legonav_s2
+
+# Local GPU
+python -m legonav.server.s2_server \
+    --model_path /path/to/Qwen2.5-VL-7B-Instruct \
+    --port 8890
+
+# Or cloud API (no GPU needed)
+OPENAI_API_KEY=sk-xxx python -m legonav.server.s2_server \
+    --backend api --provider openai --model_path gpt-4o --port 8890
+```
+
+### 2. Test S2 connectivity
+
+```bash
+python tests/test_s2_client.py \
+    --host 127.0.0.1 --port 8890 \
+    --random --instruction "Go to the chair"
+```
+
+### 3. Pipeline test (S2 only)
+
+```bash
+python -m legonav.core.pipeline \
+    --s2_host 127.0.0.1 --s2_port 8890 \
+    --random --skip_s1 \
+    --instruction "Turn left, go to the door"
+```
+
+### 4. Full Jetson deployment (ROS2 + local NavDP)
+
+> **Prerequisites:** Start robot chassis and camera drivers first:
+> ```bash
+> # Terminal 1 — robot base
+> ros2 launch wheeltec_robot base_node.launch.py
+>
+> # Terminal 2 — RGB-D camera
+> ros2 launch orbbec_camera gemini_336l.launch.py
+> ```
+
+```bash
+conda activate legonav_s1
+
+python -m legonav.robot.ros_client \
+    --instruction "Go to the black chair" \
+    --s2_host 192.168.1.100 \
+    --local_s1 \
+    --s1_checkpoint /path/to/navdp.ckpt \
+    --s1_half
+```
+
+### 5. Jetson with remote S1 server
+
+```bash
+python -m legonav.robot.ros_client \
+    --instruction "Go to the red chair" \
+    --s2_host 192.168.1.100 \
+    --s1_host 192.168.1.100 --s1_port 8901
 ```
 
 ---
@@ -208,22 +382,22 @@ traj, all_traj, values = client.nogoal_step(rgb_images, depth_images)
 |--------|---------------|:---------:|:---------:|:---------:|:------:|----------------|:---:|
 | `NavDPClient` | [NavDP](https://github.com/InternRobotics/NavDP) (InternRobotics) | ✅ | ✅ | ✅ | ✅ | Learned Critic | 8901 |
 | `NavDPLocalClient` | NavDP, local inference | ✅ | ✅ | ✅ | ✅ | Learned Critic | — |
-| `GNMClient` | [GNM](https://github.com/robodhruv/visualnav-transformer) (Berkeley, ICRA 2023) | ⬇️ | ⬇️ | ✅ | ✅ | Distance threshold | 8047 |
-| `ViNTClient` | [ViNT](https://github.com/robodhruv/visualnav-transformer) (Berkeley, CoRL 2023) | ⬇️ | ⬇️ | ✅ | ✅ | Distance threshold | 8047 |
-| `NoMaDClient` | [NoMaD](https://github.com/robodhruv/visualnav-transformer) (Berkeley, ICRA 2024) | ⬇️ | ⬇️ | ✅ | ✅ | Distance threshold | 8048 |
-| `DDPPOClient` | [DD-PPO](https://github.com/facebookresearch/habitat-lab) (Meta, ICLR 2020) | ✅ | ✅ | ⬇️ | ✅ | action=STOP | 8902 |
-| `iPlannerClient` | [iPlanner](https://github.com/ZhuangYanDLUT/iPlanner) (RSS 2023) | ✅ | ✅ | ⬇️ | ✅ | Distance threshold | 8903 |
-| `ViPlannerClient` | [ViPlanner](https://github.com/leggedrobotics/viplanner) (ETH, ICRA 2024) | ✅ | ✅ | ⬇️ | ✅ | Distance threshold | 8904 |
+| `GNMClient` | [GNM](https://github.com/robodhruv/visualnav-transformer) (Berkeley, ICRA 2023) | ↘ | ↘ | ✅ | ✅ | Distance threshold | 8047 |
+| `ViNTClient` | [ViNT](https://github.com/robodhruv/visualnav-transformer) (Berkeley, CoRL 2023) | ↘ | ↘ | ✅ | ✅ | Distance threshold | 8047 |
+| `NoMaDClient` | [NoMaD](https://github.com/robodhruv/visualnav-transformer) (Berkeley, ICRA 2024) | ↘ | ↘ | ✅ | ✅ | Distance threshold | 8048 |
+| `DDPPOClient` | [DD-PPO](https://github.com/facebookresearch/habitat-lab) (Meta, ICLR 2020) | ✅ | ✅ | ↘ | ✅ | action=STOP | 8902 |
+| `iPlannerClient` | [iPlanner](https://github.com/ZhuangYanDLUT/iPlanner) (RSS 2023) | ✅ | ✅ | ↘ | ✅ | Distance threshold | 8903 |
+| `ViPlannerClient` | [ViPlanner](https://github.com/leggedrobotics/viplanner) (ETH, ICRA 2024) | ✅ | ✅ | ↘ | ✅ | Distance threshold | 8904 |
 
-> ⬇️ = falls back to `nogoal` mode (model does not natively support this goal type)
+> ↘ = falls back to `nogoal` mode (model does not natively support this goal type)
 
 ### Stop Threshold by Policy
 
 | Policy | `stop_threshold` | Notes |
 |--------|-----------------|-------|
 | NavDP | `-3.0` *(default)* | Negative = Critic score; lower = stricter |
-| GNM / ViNT / NoMaD / iPlanner / ViPlanner | `-99` | Disable Critic-based stop; use `stop_dist` in client |
-| DD-PPO | `-99` | Stopped when model outputs action=STOP |
+| GNM / ViNT / NoMaD / iPlanner / ViPlanner | `-99` | Disable Critic-based stop; use `stop_dist` in client constructor |
+| DD-PPO | `-99` | Stops when model outputs action=STOP |
 
 ### S1 Usage in Pipeline
 
@@ -253,7 +427,8 @@ pipeline = LegoNavPipeline(
 
 # GPT-4o as S2 + ViNT as S1
 pipeline = LegoNavPipeline(
-    s2_url="http://gpu-server:8890/s2_step",
+    s2_host="gpu-server",
+    s2_port=8890,
     s1_client=ViNTClient(host="nav-server", port=8047, stop_dist=0.4),
 )
 
@@ -263,134 +438,54 @@ result = pipeline.step(rgb_bgr, depth_m)
 
 ---
 
-## Installation
+## Extending LegoNav
 
-### S2 Server (GPU machine)
+The "Lego" design means you can drop in any S1 policy by implementing `BaseS1Client`. Only the methods your model supports need to be implemented.
 
-```bash
-conda create -n legonav_s2 python=3.10
-conda activate legonav_s2
+```python
+import numpy as np
+from legonav.clients.base_client import BaseS1Client
 
-# PyTorch (adjust for your CUDA version)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# LegoNav S2 dependencies
-cd /path/to/LegoNav
-pip install -r requirements_server.txt
+class MyPolicyClient(BaseS1Client):
+    algo_name = "my_policy"
 
-# Optional: Flash Attention
-pip install flash-attn --no-build-isolation
+    def __init__(self, host="127.0.0.1", port=9000):
+        self.base_url = f"http://{host}:{port}"
 
-# Optional: API mode (already included in requirements_server.txt)
-pip install openai
+    def reset(self, camera_intrinsic, batch_size=1, stop_threshold=-3.0):
+        # initialize your model / server session here
+        return self.algo_name
+
+    def pixelgoal_step(self, pixel_goals, rgb_images, depth_images):
+        # call your server, get back waypoints
+        waypoints = ...          # np.ndarray (B, K, 2)  x=forward, y=left (metres)
+        traj = self._waypoints_to_trajectory(waypoints, T=8)
+        return self._wrap_single_trajectory(traj)
+
+    def nogoal_step(self, rgb_images, depth_images):
+        waypoints = ...
+        traj = self._waypoints_to_trajectory(waypoints, T=8)
+        return self._wrap_single_trajectory(traj)
+
+
+# Drop into the pipeline — no other changes needed
+from legonav.core.pipeline import LegoNavPipeline
+
+pipeline = LegoNavPipeline(
+    s2_host="192.168.1.100",
+    s1_client=MyPolicyClient(host="192.168.1.101", port=9000),
+)
+pipeline.reset("Go to the door", stop_threshold=-99)
 ```
 
-**Model download (local mode):**
+**Helper methods available in `BaseS1Client`:**
 
-```bash
-# Qwen2.5-VL-7B (recommended)
-huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct \
-    --local-dir /path/to/Qwen2.5-VL-7B-Instruct
-
-# Qwen3-VL-8B (latest)
-huggingface-cli download Qwen/Qwen3-VL-8B-Instruct \
-    --local-dir /path/to/Qwen3-VL-8B-Instruct
-```
-
-### S1 Edge (Jetson running NavDP)
-
-```bash
-conda create -n legonav_s1 python=3.10
-conda activate legonav_s1
-
-# Clone NavDP as a sibling of LegoNav
-cd ~/VLN
-git clone https://github.com/InternRobotics/NavDP
-
-# Jetson PyTorch (prebuilt aarch64 wheel)
-pip install /path/to/torchvision-0.21.0-cp310-cp310-linux_aarch64.whl
-
-# NavDP dependencies
-cd ~/VLN/NavDP/baselines/navdp
-pip install -r requirements.txt
-
-# LegoNav Jetson dependencies
-cd ~/VLN/LegoNav
-pip install -r requirements_jetson.txt
-
-# ROS2 packages
-sudo apt install ros-humble-cv-bridge ros-humble-message-filters
-```
-
-> **NavDP path resolution:** `navdp_agent.py` looks for `NavDP/` as a sibling of `LegoNav/`.
-> Override with: `export NAVDP_ROOT=/path/to/NavDP`
-
----
-
-## Quick Start
-
-### 1. Start S2 server
-
-```bash
-conda activate legonav_s2
-
-# Local GPU
-python -m legonav.server.s2_server \
-    --model_path /path/to/Qwen2.5-VL-7B-Instruct \
-    --port 8890
-
-# Or cloud API (no GPU needed)
-OPENAI_API_KEY=sk-xxx python -m legonav.server.s2_server \
-    --backend api --provider openai --model_path gpt-4o --port 8890
-```
-
-### 2. Test S2 connectivity
-
-```bash
-python tests/test_s2_client.py \
-    --host 127.0.0.1 --port 8890 \
-    --random --instruction "Go to the chair"
-```
-
-### 3. Pipeline test (S2 only)
-
-```bash
-python -m legonav.core.pipeline \
-    --s2_host 127.0.0.1 --s2_port 8890 \
-    --random --skip_s1 \
-    --instruction "Turn left, go to the door"
-```
-
-### 4. Full Jetson deployment (ROS2 + local NavDP)
-
-> **Prerequisites:** Start robot chassis and camera drivers first:
-> ```bash
-> # Terminal 1 — robot base
-> ros2 launch wheeltec_robot base_node.launch.py
->
-> # Terminal 2 — RGB-D camera
-> ros2 launch orbbec_camera gemini_336l.launch.py
-> ```
-
-```bash
-conda activate legonav_s1
-
-python -m legonav.robot.ros_client \
-    --instruction "Go to the black chair" \
-    --s2_host 192.168.1.100 \
-    --local_s1 \
-    --s1_checkpoint /path/to/navdp.ckpt \
-    --s1_half
-```
-
-### 5. Jetson with remote S1 server
-
-```bash
-python -m legonav.robot.ros_client \
-    --instruction "Go to the red chair" \
-    --s2_host 192.168.1.100 \
-    --s1_host 192.168.1.100 --s1_port 8901
-```
+| Method | Description |
+|--------|-------------|
+| `_wrap_single_trajectory(traj)` | Wrap `(B,T,3)` into the standard `(traj, all_traj, values)` tuple |
+| `_waypoints_to_trajectory(wps, T)` | Convert `(B,K,2)` waypoints to `(B,T,3)` trajectory |
+| `_action_to_trajectory(action, ...)` | Convert a discrete action int to a `(1,T,3)` trajectory |
 
 ---
 
@@ -401,12 +496,66 @@ python -m legonav.robot.ros_client \
 | Gemini 336L *(default)* | 1280×720 | `GEMINI_336L_INTRINSIC` |
 | Astra S | 640×480 | `ASTRA_S_INTRINSIC` |
 
-Switch camera:
+Switch camera on S2 server:
 ```bash
 python -m legonav.server.s2_server \
     --model_path /path/to/model \
     --image_width 640 --image_height 480 \
     --resize_w 640 --resize_h 480
+```
+
+---
+
+## Troubleshooting
+
+### `ModuleNotFoundError: No module named 'legonav'`
+
+Run `pip install -e .` from the repo root before launching any scripts.
+
+### `NavDP_Policy` not found / `NAVDP_ROOT` error
+
+`navdp_agent.py` expects NavDP to be a sibling directory of LegoNav:
+```
+~/VLN/
+├── LegoNav/
+└── NavDP/          ← must exist here
+```
+Or set the path explicitly:
+```bash
+export NAVDP_ROOT=/absolute/path/to/NavDP
+```
+
+### S2 server returns `503 model not loaded`
+
+The model is still loading (can take 1–3 min for 7B). Poll `/health` until `"status": "ok"`:
+```bash
+watch -n 2 curl -s http://127.0.0.1:8890/health
+```
+
+### API mode: `AuthenticationError`
+
+Ensure the API key env var is set **before** launching the server:
+```bash
+export OPENAI_API_KEY=sk-xxx
+python -m legonav.server.s2_server --backend api --provider openai --model_path gpt-4o
+```
+
+### ROS2: no camera / odometry data
+
+Verify required topics are publishing before starting `ros_client.py`:
+```bash
+ros2 topic list | grep -E "color|depth|odom"
+# Expected:
+# /camera/color/image_raw
+# /camera/depth/image
+# /odom
+```
+
+### Jetson: CUDA out of memory with NavDP
+
+Enable fp16 inference with `--s1_half`:
+```bash
+python -m legonav.robot.ros_client ... --local_s1 --s1_half
 ```
 
 ---
