@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AgentNav Pipeline — S2 (Qwen3-VL) + S1 (NavDP pixelgoal) 联合推理
+LegoNav Pipeline — S2 (Qwen3-VL) + S1 (NavDP pixelgoal) 联合推理
 
 S2 服务器 (wheeltec_s2_server.py) 分析图像+指令，输出像素目标或旋转指令；
 S1 服务器 (navdp_server.py) 接收像素目标，输出轨迹。
@@ -18,7 +18,7 @@ S1 服务器 (navdp_server.py) 接收像素目标，输出轨迹。
 
 用法:
     # 独立测试（不需要真实机器人）
-    python agentnav_pipeline.py \
+    python legonav_pipeline.py \
         --s2_host 127.0.0.1 --s2_port 8890 \
         --s1_host 127.0.0.1 --s1_port 8901 \
         --image /path/to/test.jpg \
@@ -34,7 +34,7 @@ import numpy as np
 import requests
 from PIL import Image
 
-from agentnav.clients.navdp_client import NavDPClient
+from legonav.clients.navdp_client import NavDPClient
 
 # Gemini 336L 相机内参 (1280×720) — 当前默认相机
 # fx=607.45, fy=607.40, cx=639.19, cy=361.75
@@ -58,9 +58,9 @@ ASTRA_S_INTRINSIC = np.array([
 _DEG_PER_ARROW = 15.0  # 每个箭头对应 15°
 
 
-class AgentNavPipeline:
+class LegoNavPipeline:
     """
-    AgentNav 双系统推理管线。
+    LegoNav 双系统推理管线。
 
     S1 支持两种模式：
       - 服务器模式（默认）：通过 HTTP 调用远端 NavDP 服务器
@@ -119,7 +119,7 @@ class AgentNavPipeline:
             stop_threshold=stop_threshold,
         )
         self._s1_initialized = True
-        print(f"[AgentNav] Reset. instruction='{instruction}'", flush=True)
+        print(f"[LegoNav] Reset. instruction='{instruction}'", flush=True)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Main step
@@ -186,7 +186,7 @@ class AgentNavPipeline:
             rad = task["rotation_rad"]
             self._task_queue.pop(0)
             print(
-                f"[AgentNav] task=move | {task['symbols']!r} → {math.degrees(rad):.1f}° "
+                f"[LegoNav] task=move | {task['symbols']!r} → {math.degrees(rad):.1f}° "
                 f"| remaining={len(self._task_queue)}",
                 flush=True,
             )
@@ -211,7 +211,7 @@ class AgentNavPipeline:
                 if float(values.max()) < self._stop_threshold:
                     self._task_queue.pop(0)
                     print(
-                        f"[AgentNav] task=pixel_point done (NavDP Critic) | target={target!r} "
+                        f"[LegoNav] task=pixel_point done (NavDP Critic) | target={target!r} "
                         f"| remaining={len(self._task_queue)}",
                         flush=True,
                     )
@@ -227,7 +227,7 @@ class AgentNavPipeline:
 
             # 目标初始不可见 → 固定搜索旋转，依赖 NavDP 能力完成导航
             print(
-                f"[AgentNav] task=pixel_point | target={target!r} pixel=None → search rotate",
+                f"[LegoNav] task=pixel_point | target={target!r} pixel=None → search rotate",
                 flush=True,
             )
             return {"mode": "rotate", "rotation_rad": math.radians(15)}
@@ -308,7 +308,7 @@ class AgentNavPipeline:
 
         self._task_queue = queue
         print(
-            f"[AgentNav] task queue ({len(queue)}): {[t['type'] for t in queue]}",
+            f"[LegoNav] task queue ({len(queue)}): {[t['type'] for t in queue]}",
             flush=True,
         )
 
@@ -403,7 +403,7 @@ if __name__ == "__main__":
     import argparse
     import time
 
-    parser = argparse.ArgumentParser(description="AgentNav Pipeline 快速测试")
+    parser = argparse.ArgumentParser(description="LegoNav Pipeline 快速测试")
     parser.add_argument("--s2_host", default="127.0.0.1")
     parser.add_argument("--s2_port", type=int, default=8890)
     parser.add_argument("--s1_host", default="127.0.0.1")
@@ -420,7 +420,7 @@ if __name__ == "__main__":
         parser.error("请提供 --image <路径> 或 --random")
 
     print("=" * 55)
-    print("  AgentNav Pipeline — 快速测试")
+    print("  LegoNav Pipeline — 快速测试")
     print("=" * 55)
 
     # ── 健康检查 ──────────────────────────────────────────────────────────────
@@ -428,7 +428,7 @@ if __name__ == "__main__":
     health_check(args.s2_host, args.s2_port, args.s1_host, args.s1_port)
 
     # ── 初始化管线 ────────────────────────────────────────────────────────────
-    pipeline = AgentNavPipeline(
+    pipeline = LegoNavPipeline(
         s2_host=args.s2_host, s2_port=args.s2_port,
         s1_host=args.s1_host, s1_port=args.s1_port,
     )

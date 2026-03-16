@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-AgentNav Jetson ROS2 客户端
+LegoNav Jetson ROS2 客户端
 
 在 Jetson Orin NX 上运行，连接 GPU 服务器的 S2 (Qwen3-VL) 和 S1 (NavDP)，
 实现语言指令驱动的自主导航闭环。
 
 线程架构:
   ROS2 spin 线程   — rgb_depth_callback (30Hz) + odom_callback (50Hz)
-  规划线程 (0.3s)  — 调用 AgentNavPipeline.step() → 更新 MPC 轨迹 / 旋转目标
+  规划线程 (0.3s)  — 调用 LegoNavPipeline.step() → 更新 MPC 轨迹 / 旋转目标
   控制线程 (0.1s)  — MPC solve / 角速度控制 → 发布 /cmd_vel
 
 启动:
-  python agentnav_ros_client.py \
+  python legonav_ros_client.py \
       --instruction "Go to the red chair" \
       --s2_host 192.168.1.100 \
       --s1_host 192.168.1.100
@@ -42,9 +42,9 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 
-from agentnav.core.pipeline import GEMINI_336L_INTRINSIC, AgentNavPipeline
-from agentnav.robot.controllers import Mpc_controller, PID_controller
-from agentnav.utils.thread_utils import ReadWriteLock
+from legonav.core.pipeline import GEMINI_336L_INTRINSIC, LegoNavPipeline
+from legonav.robot.controllers import Mpc_controller, PID_controller
+from legonav.utils.thread_utils import ReadWriteLock
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 配置常量
@@ -75,19 +75,19 @@ class Mode(Enum):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AgentNavNode
+# LegoNavNode
 # ─────────────────────────────────────────────────────────────────────────────
-class AgentNavNode(Node):
-    """AgentNav ROS2 主节点"""
+class LegoNavNode(Node):
+    """LegoNav ROS2 主节点"""
 
     def __init__(self, cfg: argparse.Namespace):
-        super().__init__("agentnav_node")
+        super().__init__("legonav_node")
         self.cfg = cfg
 
         # ── 初始化 S1 客户端（本地模式 or 服务器模式）────────────────────────
         s1_client = None
         if cfg.local_s1:
-            from agentnav.clients.navdp_local_client import NavDPLocalClient
+            from legonav.clients.navdp_local_client import NavDPLocalClient
             s1_client = NavDPLocalClient(
                 checkpoint=cfg.s1_checkpoint,
                 device=cfg.s1_device,
@@ -95,7 +95,7 @@ class AgentNavNode(Node):
             )
 
         # ── 初始化管线 ────────────────────────────────────────────────────────
-        self.pipeline = AgentNavPipeline(
+        self.pipeline = LegoNavPipeline(
             s2_host=cfg.s2_host, s2_port=cfg.s2_port,
             s1_host=cfg.s1_host, s1_port=cfg.s1_port,
             s1_client=s1_client,
@@ -157,7 +157,7 @@ class AgentNavNode(Node):
         threading.Thread(target=self._control_thread,  daemon=True, name="ctrl").start()
 
         self.get_logger().info(
-            f'AgentNav started | instruction="{cfg.instruction}" '
+            f'LegoNav started | instruction="{cfg.instruction}" '
             f'| S2={cfg.s2_host}:{cfg.s2_port} S1={cfg.s1_host}:{cfg.s1_port}'
         )
 
@@ -250,7 +250,7 @@ class AgentNavNode(Node):
                 time.sleep(PLAN_PERIOD)
                 continue
 
-            # ── 调用 AgentNav 管线 ─────────────────────────────────────────────
+            # ── 调用 LegoNav 管线 ─────────────────────────────────────────────
             try:
                 result = self.pipeline.step(rgb_bgr, depth_m)
             except Exception as exc:
@@ -398,7 +398,7 @@ class AgentNavNode(Node):
         """关闭：停止机器人，停止线程"""
         self._running = False
         self._publish_cmd(0.0, 0.0)
-        self.get_logger().info("[AgentNav] Stopped.")
+        self.get_logger().info("[LegoNav] Stopped.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -460,7 +460,7 @@ def _collision_detected(depth_m: np.ndarray) -> bool:
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="AgentNav Jetson ROS2 客户端",
+        description="LegoNav Jetson ROS2 客户端",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--instruction", required=True,
@@ -499,7 +499,7 @@ def main():
     cfg = parse_args()
 
     if cfg.local_s1 and not cfg.s1_checkpoint:
-        raise SystemExit("[AgentNav] --s1_checkpoint 是必填项（使用 --local_s1 时）")
+        raise SystemExit("[LegoNav] --s1_checkpoint 是必填项（使用 --local_s1 时）")
 
     # 允许通过 CLI 参数覆盖模块级速度常量
     global MAX_LINEAR, MAX_ANGULAR
@@ -507,12 +507,12 @@ def main():
     MAX_ANGULAR = cfg.max_angular
 
     rclpy.init()
-    node = AgentNavNode(cfg)
+    node = LegoNavNode(cfg)
 
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print("\n[AgentNav] KeyboardInterrupt, shutting down …")
+        print("\n[LegoNav] KeyboardInterrupt, shutting down …")
     finally:
         node.stop()
         node.destroy_node()

@@ -8,7 +8,10 @@
       "Bash(grep -r \"LingNav\\\\|lingNav\\\\|ling_nav\\\\|lingnav\" --include=\"*.py\" --include=\"*.md\" --include=\"*.txt\" --include=\"*.json\" --include=\"*.yaml\" --include=\"*.yml\" --include=\"*.cfg\" --include=\"*.toml\" -l 2>/dev/null | head -30)",
       "Bash(find . -type f \\\\\\( -name \"*.py\" -o -name \"*.md\" -o -name \"*.sh\" -o -name \"*.toml\" -o -name \"*.cfg\" \\\\\\) ! -path \"./.claude/*\" | xargs sed -i 's/lingnav/agentnav/g; s/LingNav/AgentNav/g')",
       "Bash(cd C:/GitHub/AgentNav && mv lingnav agentnav)",
-      "Bash(grep -r \"lingnav\\\\|LingNav\" --include=\"*.py\" --include=\"*.md\" --include=\"*.sh\" --include=\"*.toml\" -l C:/GitHub/AgentNav/ 2>/dev/null | grep -v \".claude/\")"
+      "Bash(grep -r \"lingnav\\\\|LingNav\" --include=\"*.py\" --include=\"*.md\" --include=\"*.sh\" --include=\"*.toml\" -l C:/GitHub/AgentNav/ 2>/dev/null | grep -v \".claude/\")",
+      "Bash(find:*)",
+      "Bash(git mv:*)",
+      "Bash(git add:*)"
     ]
   }
 }

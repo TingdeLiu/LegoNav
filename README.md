@@ -1,6 +1,11 @@
-# AgentNav
+# LegoNav
 
-**AgentNav** is a dual-system visual language navigation framework combining **Qwen3-VL (S2)** for language-grounded waypoint reasoning and **NavDP (S1)** for low-level motion control — designed for real-world robot deployment on Jetson edge hardware.
+**LegoNav** is a modular visual language navigation framework — designed like **Lego bricks**: each module (S1, S2, …) is independently replaceable and freely composable.
+
+- **S2** (Qwen3-VL): language-grounded waypoint reasoning
+- **S1** (NavDP): low-level motion control policy
+
+Plug in any S1 or S2 implementation, run on Jetson edge hardware.
 
 ---
 
@@ -19,7 +24,7 @@ graph TB
         direction TB
         CAM["RGB-D Camera<br/>(Gemini 336L / Astra S)"]
         ROS["ROS2 Node<br/>ros_client.py"]
-        PIPE["AgentNavPipeline<br/>pipeline.py"]
+        PIPE["LegoNavPipeline<br/>pipeline.py"]
         S1["NavDP Policy<br/>(navdp_agent.py)"]
         CTRL["MPC + PID Controller<br/>(CasADi)"]
         ROBOT["Mobile Robot"]
@@ -85,15 +90,15 @@ graph LR
 ## Project Structure
 
 ```
-AgentNav/
-├── agentnav/                        # Python package (pip install -e .)
+LegoNav/
+├── legonav/                         # Python package (pip install -e .)
 │   ├── server/
 │   │   └── s2_server.py           # S2: Qwen3-VL HTTP server (port 8890)
 │   ├── clients/
 │   │   ├── navdp_client.py        # HTTP S1 client
 │   │   └── navdp_local_client.py  # Local S1 inference (replaces HTTP client)
 │   ├── core/
-│   │   ├── pipeline.py            # S2+S1 orchestration (AgentNavPipeline)
+│   │   ├── pipeline.py            # S2+S1 orchestration (LegoNavPipeline)
 │   │   └── navdp_agent.py         # NavDP_Policy wrapper
 │   ├── robot/
 │   │   ├── ros_client.py          # Jetson ROS2 node (planning + control threads)
@@ -110,8 +115,8 @@ AgentNav/
 └── requirements_jetson.txt        # Jetson edge dependencies
 ```
 
-**NavDP dependency**: `navdp_agent.py` loads `NavDP_Policy` from a `NavDP/` directory that is a sibling of `AgentNav/` (from [InternRobotics/NavDP](https://github.com/InternRobotics/NavDP)).
-For example, if AgentNav is at `~/VLN/AgentNav`, then NavDP should be at `~/VLN/NavDP`.
+**NavDP dependency**: `navdp_agent.py` loads `NavDP_Policy` from a `NavDP/` directory that is a sibling of `LegoNav/` (from [InternRobotics/NavDP](https://github.com/InternRobotics/NavDP)).
+For example, if LegoNav is at `~/VLN/LegoNav`, then NavDP should be at `~/VLN/NavDP`.
 Override with the environment variable: `NAVDP_ROOT=/path/to/NavDP`.
 
 ---
@@ -133,8 +138,8 @@ cd Qwen3-VL
 # Install PyTorch (adjust for your CUDA version; example: CUDA 12.1)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# Install AgentNav S2 dependencies
-cd /path/to/AgentNav
+# Install LegoNav S2 dependencies
+cd /path/to/LegoNav
 pip install -r requirements_server.txt
 
 # Optional: Flash Attention for faster inference
@@ -152,7 +157,7 @@ Reference: [InternRobotics/NavDP](https://github.com/InternRobotics/NavDP)
 conda create -n navdp python=3.10
 conda activate navdp
 
-# Clone NavDP as a sibling of AgentNav
+# Clone NavDP as a sibling of LegoNav
 cd ~/VLN
 git clone https://github.com/InternRobotics/NavDP
 
@@ -163,8 +168,8 @@ pip install /home/wheeltec/torchvision-0.21.0-cp310-cp310-linux_aarch64.whl
 cd ~/VLN/NavDP/baselines/navdp
 pip install -r requirements.txt
 
-# Install AgentNav Jetson dependencies
-cd ~/VLN/AgentNav
+# Install LegoNav Jetson dependencies
+cd ~/VLN/LegoNav
 pip install -r requirements_jetson.txt
 
 # ROS2 packages
@@ -180,7 +185,7 @@ sudo apt install ros-humble-cv-bridge ros-humble-message-filters
 ```bash
 conda activate qwen3vl
 
-python -m agentnav.server.s2_server \
+python -m legonav.server.s2_server \
     --model_path /path/to/Qwen3-VL-8B-Instruct \
     --port 8890
 ```
@@ -204,7 +209,7 @@ python tests/test_s2_client.py --host 127.0.0.1 --port 8890 \
 ```bash
 conda activate qwen3vl
 
-python -m agentnav.core.pipeline \
+python -m legonav.core.pipeline \
     --s2_host 127.0.0.1 --s2_port 8890 \
     --random --skip_s1 \
     --instruction "Turn left, go to the door"
@@ -212,7 +217,7 @@ python -m agentnav.core.pipeline \
 
 ### 4. Full Jetson deployment (ROS2 + local S1)
 
-> **Prerequisites:** Before running AgentNav, start the robot chassis driver and camera driver in separate terminals so that the required ROS2 topics are available:
+> **Prerequisites:** Before running LegoNav, start the robot chassis driver and camera driver in separate terminals so that the required ROS2 topics are available:
 >
 > ```bash
 > # Terminal 1 — robot base (publishes /odom, subscribes /cmd_vel)
@@ -225,9 +230,9 @@ python -m agentnav.core.pipeline \
 ```bash
 conda activate navdp
 
-cd ~/VLN/AgentNav
+cd ~/VLN/LegoNav
 # NavDP is auto-detected from the sibling directory; no NAVDP_ROOT needed
-python -m agentnav.robot.ros_client \
+python -m legonav.robot.ros_client \
     --instruction "Go to the black chair" \
     --s2_host 192.168.1.100 \
     --local_s1 \
@@ -240,7 +245,7 @@ python -m agentnav.robot.ros_client \
 ```bash
 conda activate navdp
 
-python -m agentnav.robot.ros_client \
+python -m legonav.robot.ros_client \
     --instruction "Go to the red chair" \
     --s2_host 192.168.1.100 \
     --s1_host 192.168.1.100 --s1_port 8901
@@ -251,7 +256,7 @@ python -m agentnav.robot.ros_client \
 ```bash
 conda activate navdp
 
-python -c "from agentnav.clients.navdp_local_client import NavDPLocalClient; print('OK')"
+python -c "from legonav.clients.navdp_local_client import NavDPLocalClient; print('OK')"
 ```
 
 ---
@@ -265,7 +270,7 @@ python -c "from agentnav.clients.navdp_local_client import NavDPLocalClient; pri
 
 Switch camera (S2 server):
 ```bash
-python -m agentnav.server.s2_server \
+python -m legonav.server.s2_server \
     --model_path /path/to/model \
     --image_width 640 --image_height 480 \
     --resize_w 640 --resize_h 480

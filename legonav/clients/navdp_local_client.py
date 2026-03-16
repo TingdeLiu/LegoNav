@@ -22,12 +22,12 @@ NavDP 端侧本地推理客户端
 
 注意:
   - 依赖 NavDPAgent（navdp_agent.py）和外部 NavDP 项目（policy_network.py）
-  - NavDP 项目路径通过环境变量 NAVDP_ROOT 或默认与 AgentNav 同级的 NavDP/ 目录指定
+  - NavDP 项目路径通过环境变量 NAVDP_ROOT 或默认与 LegoNav 同级的 NavDP/ 目录指定
 """
 
 import numpy as np
 
-from agentnav.core.navdp_agent import NavDPAgent
+from legonav.core.navdp_agent import NavDPAgent
 
 
 class NavDPLocalClient:
@@ -101,7 +101,7 @@ class NavDPLocalClient:
 
         Args:
             camera_intrinsic : 相机内参矩阵 (4×4)
-            batch_size       : 批次大小（AgentNav 固定为 1）
+            batch_size       : 批次大小（LegoNav 固定为 1）
             stop_threshold   : Critic 停止阈值（值越小越保守）
 
         Returns:

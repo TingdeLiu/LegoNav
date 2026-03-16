@@ -5,6 +5,6 @@
 MODEL_PATH="${1:-Qwen/Qwen3-VL-7B-Instruct}"
 
 conda activate qwen3vl
-python -m agentnav.server.s2_server \
+python -m legonav.server.s2_server \
     --model_path "$MODEL_PATH" \
     --port 8890

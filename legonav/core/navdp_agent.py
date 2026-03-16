@@ -17,7 +17,7 @@ from matplotlib import colormaps as cm
 # ---------------------------------------------------------------------------
 # 自动定位 NavDP 项目路径，将其 baselines/navdp 加入 sys.path
 # 用户也可通过环境变量 NAVDP_ROOT 显式指定
-# 默认值: 与 AgentNav 同级的 NavDP/ 目录 (C:\GitHub\NavDP)
+# 默认值: 与 LegoNav 同级的 NavDP/ 目录 (C:\GitHub\NavDP)
 # ---------------------------------------------------------------------------
 _NAVDP_ROOT = os.environ.get(
     "NAVDP_ROOT",
