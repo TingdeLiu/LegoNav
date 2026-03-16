@@ -24,8 +24,10 @@ import cv2
 import numpy as np
 import requests
 
+from legonav.clients.base_client import BaseS1Client
 
-class NavDPClient:
+
+class NavDPClient(BaseS1Client):
     """NavDP S1 HTTP 客户端
 
     Args:

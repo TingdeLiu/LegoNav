@@ -27,10 +27,11 @@ NavDP 端侧本地推理客户端
 
 import numpy as np
 
+from legonav.clients.base_client import BaseS1Client
 from legonav.core.navdp_agent import NavDPAgent
 
 
-class NavDPLocalClient:
+class NavDPLocalClient(BaseS1Client):
     """NavDP 端侧本地推理客户端
 
     接口与 NavDPClient（HTTP 客户端）完全一致，可无缝替换。

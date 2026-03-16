@@ -1,8 +1,9 @@
 flask>=3.0
-transformers>=4.57.0
+transformers>=4.51.0
 torch
 accelerate
 pillow
 numpy
-qwen-vl-utils==0.0.14
+qwen-vl-utils>=0.0.14
+openai>=1.0.0          # 仅 api 模式需要
 # flash-attn is optional; install with: pip install flash-attn --no-build-isolation
