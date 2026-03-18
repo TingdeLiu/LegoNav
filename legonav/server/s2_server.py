@@ -414,7 +414,7 @@ def parse_output(raw: str) -> dict:
 
             if task_type == "pixel_point":
                 norm = task.get("point_2d")
-                if isinstance(norm, (list, tuple)) and len(norm) == 2 and norm[0] is not None:
+                if isinstance(norm, (list, tuple)) and len(norm) == 2 and norm[0] is not None and norm[1] is not None:
                     nx, ny = float(norm[0]), float(norm[1])
                     u, v = _norm_to_pixel(nx, ny)
                     task["point_2d_pixel"] = [u, v]
@@ -448,7 +448,7 @@ def parse_output(raw: str) -> dict:
             data = json.loads(json_match.group())
             target = data.get("target")
             norm = data.get("point_2d")
-            if isinstance(norm, (list, tuple)) and len(norm) == 2:
+            if isinstance(norm, (list, tuple)) and len(norm) == 2 and norm[0] is not None and norm[1] is not None:
                 nx, ny = float(norm[0]), float(norm[1])
                 point_2d_norm = [int(nx), int(ny)]
                 u, v = _norm_to_pixel(nx, ny)

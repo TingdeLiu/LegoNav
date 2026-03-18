@@ -106,7 +106,10 @@ class NavDPAgent:
         Returns:
             (B, image_size, image_size, C) float32 归一化图像
         """
-        assert len(images.shape) == 4
+        if len(images.shape) != 4:
+            raise ValueError(
+                f"process_image: expected 4-D array (B, H, W, C), got shape {images.shape}"
+            )
         H, W = images.shape[1], images.shape[2]
         prop = self.image_size / max(H, W)
         result = []
@@ -128,7 +131,10 @@ class NavDPAgent:
         Returns:
             (B, image_size, image_size, 1) float32 处理后深度图
         """
-        assert len(depths.shape) == 4
+        if len(depths.shape) != 4:
+            raise ValueError(
+                f"process_depth: expected 4-D array (B, H, W, 1), got shape {depths.shape}"
+            )
         depths = depths.copy()
         depths[depths == np.inf] = 0
         H, W = depths.shape[1], depths.shape[2]
@@ -163,13 +169,13 @@ class NavDPAgent:
             max_x, max_y = px + 10, py + 10
             if min_x <= 0:
                 panel[:, 0:10] = 255
-            elif min_y <= 0:
+            if min_y <= 0:
                 panel[0:10, :] = 255
-            elif max_x >= panel.shape[1]:
+            if max_x >= panel.shape[1]:
                 panel[:, panel.shape[1] - 10 :] = 255
-            elif max_y >= panel.shape[0]:
+            if max_y >= panel.shape[0]:
                 panel[panel.shape[0] - 10 :, :] = 255
-            elif min_x > 0 and min_y > 0 and max_x < panel.shape[1] and max_y < panel.shape[0]:
+            if min_x > 0 and min_y > 0 and max_x < panel.shape[1] and max_y < panel.shape[0]:
                 panel[min_y:max_y, min_x:max_x] = 255
             resized = cv2.resize(panel, (-1, -1), fx=prop, fy=prop, interpolation=cv2.INTER_NEAREST)
             pad_w = max((self.image_size - resized.shape[1]) // 2, 0)

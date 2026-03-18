@@ -33,10 +33,12 @@ class NavDPClient(BaseS1Client):
     Args:
         host: Server 地址 (default: '127.0.0.1')
         port: Server 端口 (default: 8901)
+        timeout: HTTP 超时秒数 (default: 10.0)
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8901):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8901, timeout: float = 10.0):
         self.base_url = f"http://{host}:{port}"
+        self.timeout = timeout
 
     def reset(
         self,
@@ -54,23 +56,33 @@ class NavDPClient(BaseS1Client):
         Returns:
             算法名称 (str)
         """
-        resp = requests.post(
-            f"{self.base_url}/navigator_reset",
-            json={
-                "intrinsic": camera_intrinsic.tolist(),
-                "stop_threshold": stop_threshold,
-                "batch_size": batch_size,
-            },
-        )
-        return resp.json()["algo"]
+        try:
+            resp = requests.post(
+                f"{self.base_url}/navigator_reset",
+                json={
+                    "intrinsic": camera_intrinsic.tolist(),
+                    "stop_threshold": stop_threshold,
+                    "batch_size": batch_size,
+                },
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return resp.json()["algo"]
+        except Exception as exc:
+            raise RuntimeError(f"NavDPClient reset failed: {exc}") from exc
 
     def reset_env(self, env_id: int) -> str:
         """重置指定环境"""
-        resp = requests.post(
-            f"{self.base_url}/navigator_reset_env",
-            json={"env_id": env_id},
-        )
-        return resp.json()["algo"]
+        try:
+            resp = requests.post(
+                f"{self.base_url}/navigator_reset_env",
+                json={"env_id": env_id},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return resp.json()["algo"]
+        except Exception as exc:
+            raise RuntimeError(f"NavDPClient reset_env failed: {exc}") from exc
 
     @staticmethod
     def _encode_images(rgb_images: np.ndarray, depth_images: np.ndarray):
@@ -128,8 +140,14 @@ class NavDPClient(BaseS1Client):
             "depth_time": time.time(),
             "rgb_time": time.time(),
         }
-        resp = requests.post(f"{self.base_url}/pointgoal_step", files=files, data=data)
-        result = resp.json()
+        try:
+            resp = requests.post(
+                f"{self.base_url}/pointgoal_step", files=files, data=data, timeout=self.timeout
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"NavDPClient /pointgoal_step failed: {exc}") from exc
         return (
             np.array(result["trajectory"]),
             np.array(result["all_trajectory"]),
@@ -148,8 +166,14 @@ class NavDPClient(BaseS1Client):
         """
         files = self._encode_images(rgb_images, depth_images)
         data = {"depth_time": time.time(), "rgb_time": time.time()}
-        resp = requests.post(f"{self.base_url}/nogoal_step", files=files, data=data)
-        result = resp.json()
+        try:
+            resp = requests.post(
+                f"{self.base_url}/nogoal_step", files=files, data=data, timeout=self.timeout
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"NavDPClient /nogoal_step failed: {exc}") from exc
         return (
             np.array(result["trajectory"]),
             np.array(result["all_trajectory"]),
@@ -181,8 +205,14 @@ class NavDPClient(BaseS1Client):
         files["goal"] = ("goal.jpg", goal_bytes.getvalue(), "image/jpeg")
 
         data = {"depth_time": time.time(), "rgb_time": time.time()}
-        resp = requests.post(f"{self.base_url}/imagegoal_step", files=files, data=data)
-        result = resp.json()
+        try:
+            resp = requests.post(
+                f"{self.base_url}/imagegoal_step", files=files, data=data, timeout=self.timeout
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"NavDPClient /imagegoal_step failed: {exc}") from exc
         return (
             np.array(result["trajectory"]),
             np.array(result["all_trajectory"]),
@@ -214,8 +244,14 @@ class NavDPClient(BaseS1Client):
             "depth_time": time.time(),
             "rgb_time": time.time(),
         }
-        resp = requests.post(f"{self.base_url}/pixelgoal_step", files=files, data=data)
-        result = resp.json()
+        try:
+            resp = requests.post(
+                f"{self.base_url}/pixelgoal_step", files=files, data=data, timeout=self.timeout
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"NavDPClient /pixelgoal_step failed: {exc}") from exc
         return (
             np.array(result["trajectory"]),
             np.array(result["all_trajectory"]),

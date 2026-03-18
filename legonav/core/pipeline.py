@@ -125,13 +125,19 @@ class LegoNavPipeline:
     # Main step
     # ──────────────────────────────────────────────────────────────────────────
 
-    def step(self, rgb_bgr: np.ndarray, depth_m: np.ndarray) -> dict:
+    def step(
+        self,
+        rgb_bgr: np.ndarray,
+        depth_m: np.ndarray,
+        odom: list = None,
+    ) -> dict:
         """
         单步推理。
 
         参数:
             rgb_bgr  : (H, W, 3) uint8, BGR 格式（与 OpenCV 一致）
             depth_m  : (H, W) float32, 深度单位为米
+            odom     : [x, y, yaw] 当前里程计（米/弧度）；为 None 时退化为旧版像素目标行为
 
         返回 dict，key "mode" 决定后续控制方式：
             mode="trajectory"
@@ -139,14 +145,14 @@ class LegoNavPipeline:
                                轨迹坐标系: x=前, y=左, z=上
                 all_trajectory: np.ndarray (1, N, 24, 3)，所有候选轨迹
                 values       : np.ndarray (1, N)，Critic 评分
-                s2           : S2 原始响应 dict
+                target       : str，目标名称
+                camera_goal  : list [x, y, z]，当前相机坐标系下目标（米）
 
             mode="rotate"
                 rotation_rad : float，正值=逆时针(左转)，负值=顺时针(右转)
-                s2           : S2 原始响应 dict
 
             mode="stop"
-                s2           : S2 原始响应 dict
+                （无附加字段）
 
             mode="error"
                 message      : str
@@ -195,10 +201,49 @@ class LegoNavPipeline:
         # ── pixel_point 任务（目标导航）───────────────────────────────────────
         if task["type"] == "pixel_point":
             target = task["target"]
-            pixel  = task.get("pixel")   # 队列填充时存入的初始像素坐标
 
-            # 目标可见：直接调 S1，无需刷新 S2
-            # NavDP memory queue 能处理机器人移动后的坐标偏差
+            # ── 首次执行：将初始像素 + 深度 + 里程计锚定为世界坐标 ──────────
+            if "world_target" not in task and odom is not None:
+                pixel = task.get("pixel")
+                if pixel is not None:
+                    wt = self._pixel_depth_to_world(pixel, depth_m, odom)
+                    if wt is not None:
+                        task["world_target"] = wt
+                        print(
+                            f"[LegoNav] Anchored world_target=({wt[0]:.2f}, {wt[1]:.2f})"
+                            f" for target={target!r}",
+                            flush=True,
+                        )
+
+            # ── 有世界坐标锚点：每帧转换为当前相机坐标系调 S1 ─────────────
+            if "world_target" in task and odom is not None:
+                camera_goal = self._world_to_camera_goal(task["world_target"], odom)
+                try:
+                    traj, all_traj, values = self._call_s1_pointgoal(
+                        rgb_bgr, depth_m, camera_goal
+                    )
+                except Exception as exc:
+                    return {"mode": "error", "message": f"S1 request failed: {exc}"}
+
+                if float(values.max()) < self._stop_threshold:
+                    self._task_queue.pop(0)
+                    print(
+                        f"[LegoNav] task=pixel_point done | target={target!r}"
+                        f" | remaining={len(self._task_queue)}",
+                        flush=True,
+                    )
+
+                return {
+                    "mode": "trajectory",
+                    "trajectory": traj,
+                    "all_trajectory": all_traj,
+                    "values": values,
+                    "target": target,
+                    "camera_goal": camera_goal.tolist(),
+                }
+
+            # ── 降级：无里程计或深度锚定失败 → 使用初始像素（兼容旧行为）──
+            pixel = task.get("pixel")
             if pixel is not None:
                 try:
                     traj, all_traj, values = self._call_s1_pixelgoal(
@@ -207,12 +252,11 @@ class LegoNavPipeline:
                 except Exception as exc:
                     return {"mode": "error", "message": f"S1 request failed: {exc}"}
 
-                # NavDP Critic 判定到达 → 弹出任务，下一步自动执行后续任务
                 if float(values.max()) < self._stop_threshold:
                     self._task_queue.pop(0)
                     print(
-                        f"[LegoNav] task=pixel_point done (NavDP Critic) | target={target!r} "
-                        f"| remaining={len(self._task_queue)}",
+                        f"[LegoNav] task=pixel_point done | target={target!r}"
+                        f" | remaining={len(self._task_queue)}",
                         flush=True,
                     )
 
@@ -225,7 +269,7 @@ class LegoNavPipeline:
                     "pixel": pixel,
                 }
 
-            # 目标初始不可见 → 固定搜索旋转，依赖 NavDP 能力完成导航
+            # 目标初始不可见 → 固定搜索旋转
             print(
                 f"[LegoNav] task=pixel_point | target={target!r} pixel=None → search rotate",
                 flush=True,
@@ -253,6 +297,90 @@ class LegoNavPipeline:
         )
         resp.raise_for_status()
         return resp.json()
+
+    def _pixel_depth_to_world(
+        self,
+        pixel: list,
+        depth_m: np.ndarray,
+        odom: list,
+    ):
+        """像素坐标 + 深度图 + 里程计 → 世界坐标 3D 锚点。
+
+        Args:
+            pixel   : [u, v] 像素坐标
+            depth_m : (H, W) 深度图（米）
+            odom    : [x, y, yaw]
+
+        Returns:
+            np.ndarray (3,) [wx, wy, wz]；目标区域深度全部无效时返回 None
+        """
+        H, W = depth_m.shape
+        u = int(np.clip(pixel[0], 0, W - 1))
+        v = int(np.clip(pixel[1], 0, H - 1))
+
+        # 邻域 5px 中位数深度，减少单点噪声
+        r = 5
+        roi = depth_m[max(0, v - r):min(H, v + r), max(0, u - r):min(W, u + r)]
+        valid = roi[(roi > 0.1) & (roi < 10.0)]
+        if valid.size == 0:
+            return None
+        d = float(np.median(valid))
+
+        # 像素 → 相机坐标系 (x=前, y=左, z=上)
+        fx = self.camera_intrinsic[0, 0]
+        fy = self.camera_intrinsic[1, 1]
+        cx = self.camera_intrinsic[0, 2]
+        cy = self.camera_intrinsic[1, 2]
+        x_fwd  =  d
+        y_left = -(u - cx) / fx * d
+        z_up   = -(v - cy) / fy * d
+
+        # 相机坐标 → 世界坐标（2D 旋转 + 平移）
+        ox, oy, yaw = odom[0], odom[1], odom[2]
+        cos_y, sin_y = math.cos(yaw), math.sin(yaw)
+        wx = ox + x_fwd * cos_y - y_left * sin_y
+        wy = oy + x_fwd * sin_y + y_left * cos_y
+        wz = z_up
+        return np.array([wx, wy, wz], dtype=np.float64)
+
+    def _world_to_camera_goal(
+        self,
+        world_target: np.ndarray,
+        odom: list,
+    ) -> np.ndarray:
+        """世界坐标锚点 → 当前相机坐标系下的 3D 目标。
+
+        Args:
+            world_target : (3,) [wx, wy, wz]
+            odom         : [x, y, yaw]
+
+        Returns:
+            np.ndarray (3,) [x=前, y=左, z=上]（米）
+        """
+        ox, oy, yaw = odom[0], odom[1], odom[2]
+        cos_y, sin_y = math.cos(yaw), math.sin(yaw)
+        dx = world_target[0] - ox
+        dy = world_target[1] - oy
+        x_fwd  =  dx * cos_y + dy * sin_y
+        y_left = -dx * sin_y + dy * cos_y
+        z_up   = float(world_target[2])
+        return np.array([x_fwd, y_left, z_up], dtype=np.float32)
+
+    def _call_s1_pointgoal(
+        self,
+        rgb_bgr: np.ndarray,
+        depth_m: np.ndarray,
+        camera_goal: np.ndarray,
+    ):
+        """调用 S1 pointgoal_step，目标为当前相机坐标系 3D 点。
+
+        Args:
+            camera_goal : (3,) [x=前, y=左, z=上]（米）
+        """
+        point_goals = camera_goal[np.newaxis]               # (1, 3)
+        rgb_batch   = rgb_bgr[np.newaxis]                   # (1, H, W, 3)
+        depth_batch = depth_m[np.newaxis, :, :, np.newaxis] # (1, H, W, 1)
+        return self.navdp.pointgoal_step(point_goals, rgb_batch, depth_batch)
 
     def _call_s1_pixelgoal(
         self,

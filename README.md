@@ -66,21 +66,38 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant Cam as RGB-D Camera
-    participant ROS as ROS2 Node
+    participant ROS as ROS2 Node (+ Odometry)
     participant S2 as S2 Server (VLM)
+    participant Pipe as LegoNavPipeline
     participant S1 as S1 Policy
     participant Robot as Robot Actuator
 
+    ROS->>S2: POST /s2_step {image, instruction}
+    S2-->>ROS: Structured task list (JSON) — pixel goal / rotation / stop
+
     loop Per Frame
-        Cam->>ROS: RGB-D frame
-        ROS->>S2: POST /s2_step {image, instruction}
-        S2->>S2: Task decomposition → pixel goal / rotation / stop
-        S2-->>ROS: Structured task list (JSON)
-        ROS->>S1: pixelgoal_step / pointgoal_step / nogoal_step
-        S1-->>ROS: trajectory (B, T, 3)
+        Cam->>ROS: RGB-D frame + odom [x, y, yaw]
+        ROS->>Pipe: step(rgb, depth, odom)
+
+        alt First step of pixel_point task
+            Pipe->>Pipe: pixel + depth + odom → world_target [wx, wy, wz]
+            Note over Pipe: 3D anchor locked once, never re-identified
+        end
+
+        Pipe->>Pipe: world_target + odom → camera_goal [x_fwd, y_left, z_up]
+        Pipe->>S1: pointgoal_step(camera_goal, rgb, depth)
+        S1-->>Pipe: trajectory (B, T, 3)
+        Pipe-->>ROS: {mode, trajectory, camera_goal, …}
         ROS->>Robot: MPC / PID execution
     end
 ```
+
+> **World-coordinate goal tracking:** S2 localizes the target once as a pixel coordinate.
+> On the first navigation step, the pipeline back-projects that pixel through the depth image
+> into a fixed 3D world anchor `world_target`.  Every subsequent frame re-projects that anchor
+> into the current camera frame using odometry, giving every S1 policy a geometrically
+> consistent `pointgoal` that tracks the true target location as the robot moves —
+> no periodic VLM re-queries, no semantic ambiguity from look-alike objects.
 
 ### Deployment Modes
 
@@ -433,8 +450,29 @@ pipeline = LegoNavPipeline(
 )
 
 pipeline.reset("Go to the black chair", stop_threshold=-99)
-result = pipeline.step(rgb_bgr, depth_m)
+
+# odom = [x, y, yaw]  from odometry — enables world-coordinate goal tracking.
+# Pass None (or omit) to fall back to fixed-pixel mode (e.g. in offline tests).
+result = pipeline.step(rgb_bgr, depth_m, odom=[x, y, yaw])
 ```
+
+**`step()` return fields by mode:**
+
+| `mode` | Key fields |
+|--------|-----------|
+| `"trajectory"` | `trajectory (1,T,3)`, `all_trajectory`, `values`, `target`, `camera_goal [x,y,z]` |
+| `"rotate"` | `rotation_rad` (positive = CCW / left, negative = CW / right) |
+| `"stop"` | — |
+| `"error"` | `message`, `s2` (raw S2 response if available) |
+
+**`step()` return fields by mode:**
+
+| `mode` | Key fields |
+|--------|-----------|
+| `"trajectory"` | `trajectory (1,T,3)`, `all_trajectory`, `values`, `target`, `camera_goal [x,y,z]` |
+| `"rotate"` | `rotation_rad` (positive = CCW / left, negative = CW / right) |
+| `"stop"` | — |
+| `"error"` | `message`, `s2` (raw S2 response if available) |
 
 ---
 

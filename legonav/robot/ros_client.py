@@ -174,7 +174,10 @@ class LegoNavNode(Node):
         # ── Depth：16UC1 (mm) → float32 (m) ──────────────────────────────────
         raw_d = self._bridge.imgmsg_to_cv2(depth_msg, "16UC1").astype(np.float32)
         depth = raw_d / 1000.0
-        depth[~np.isfinite(depth)] = 0.0
+        # 将无效值（0 mm 原始值）和非有限值设为 NaN，再用 DEPTH_MAX_VALID 替换，
+        # 使碰撞检测的有效范围过滤逻辑能正确排除这些像素。
+        invalid = ~np.isfinite(depth) | (raw_d == 0)
+        depth[invalid] = DEPTH_MAX_VALID
 
         ts = rgb_msg.header.stamp.sec + rgb_msg.header.stamp.nanosec * 1e-9
 
@@ -228,11 +231,11 @@ class LegoNavNode(Node):
                 continue
 
             # ── 读取传感器数据 ─────────────────────────────────────────────────
-            self._rgb_depth_lock.acquire_read()
+            self._rgb_depth_lock.acquire_write()
             rgb_bgr = copy.deepcopy(self._rgb_bgr)
             depth_m = copy.deepcopy(self._depth_m)
             self._new_frame = False
-            self._rgb_depth_lock.release_read()
+            self._rgb_depth_lock.release_write()
 
             # ── 读取里程计（时间最近的） ────────────────────────────────────────
             self._odom_lock.acquire_read()
@@ -252,7 +255,7 @@ class LegoNavNode(Node):
 
             # ── 调用 LegoNav 管线 ─────────────────────────────────────────────
             try:
-                result = self.pipeline.step(rgb_bgr, depth_m)
+                result = self.pipeline.step(rgb_bgr, depth_m, odom)
             except Exception as exc:
                 self.get_logger().error(f"[Plan] pipeline.step failed: {exc}")
                 time.sleep(PLAN_PERIOD)
@@ -261,8 +264,8 @@ class LegoNavNode(Node):
             mode = result.get("mode")
             self.get_logger().info(
                 f"[Plan] mode={mode} | "
-                f"target={result.get('s2', {}).get('target')} | "
-                f"nav={result.get('s2', {}).get('navigation')!r}"
+                f"target={result.get('target')} | "
+                f"goal={result.get('camera_goal')}"
             )
 
             # ── 处理结果 ──────────────────────────────────────────────────────
